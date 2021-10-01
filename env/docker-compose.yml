@@ -1,0 +1,114 @@
+version: "3.7"
+services:
+  # virtual host reverse proxy ##########################################################
+  nginx-proxy:
+    # docker exec -it nginx-proxy /bin/bash --login
+    container_name: "nginx-proxy"
+    image: nginxproxy/nginx-proxy
+    platform: linux/x86_64 # for Apple M1
+    ports:
+      - "443:443"
+    volumes:
+      - ../nginx-log/proxy:/var/log/nginx
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - type: bind
+        source: ./config/certs/ # created by mkcert `mkcert -cert-file certs/shared.crt -key-file certs/shared.key localhost 127.0.0.1 ::1 example.com "*.example.com"`
+        target: /etc/nginx/certs
+    restart: always
+    networks:
+      - docker-network
+
+  # app server ##########################################################
+  nginx-1:
+    # docker exec -it nginx-1 /bin/sh --login
+    container_name: "nginx-1"
+    build:
+      context: ./dockerfile/nginx/
+      dockerfile: Dockerfile
+    # platform: linux/x86_64 # for Apple M1
+    volumes:
+      - ../app/app1:/var/www/app
+      - ./config/app1-nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/app1-nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ../nginx-log/app1:/var/log/nginx
+    environment:
+      VIRTUAL_HOST: app1.example.com # /etc/hosts 127.0.0.1 app1.example.com
+      CERT_NAME: shared
+      HSTS: "off"
+      TZ: "Asia/Tokyo"
+    networks:
+      - docker-network
+
+  # app server ##########################################################
+  nginx-2:
+    # docker exec -it nginx-2 /bin/sh --login
+    container_name: "nginx-2"
+    build:
+      context: ./dockerfile/nginx/
+      dockerfile: Dockerfile
+    # platform: linux/x86_64 # for Apple M1
+    volumes:
+      - ../app/app2:/var/www/app
+      - ./config/app2-nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/app2-nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ../nginx-log/app2:/var/log/nginx
+    environment:
+      VIRTUAL_HOST: app2.example.com # /etc/hosts 127.0.0.1 app2.example.com
+      CERT_NAME: shared
+      HSTS: "off"
+      TZ: "Asia/Tokyo"
+    networks:
+      - docker-network
+
+  # DB ##########################################################
+  mysql:
+    # docker exec -it mysql8.0 /bin/bash --login -c "mysql -u docker -pdocker"
+    container_name: "mysql8.0"
+    build:
+      context: ./dockerfile/mysql/
+      dockerfile: Dockerfile
+    # default-authentication set mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      - MYSQL_USER=docker
+      - MYSQL_PASSWORD=docker
+      - MYSQL_ROOT_PASSWORD=password
+      - TZ=Asia/Tokyo
+    volumes:
+      - ../db/data:/var/lib/mysql
+      - ../db/log:/var/log/mysql
+      - ../db/init-sql:/docker-entrypoint-initdb.d
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    ports:
+      - "3306:3306"
+    expose:
+      - 3306
+    tty: true # running container
+    networks:
+      - docker-network
+
+  # develop container ##########################################################
+  node:
+    # docker exec -it node /bin/sh --login
+    container_name: "node"
+    image: node:16.2.0-alpine
+    platform: linux/x86_64 # for Apple M1
+    command: sh -c 'apk add tzdata' # Alpine TZ
+    ports:
+      - "80:80"
+      - "8000:8000"
+      - "8080:8080"
+      - "8081:8081"
+      - "3000:3000" # for nuxt run dev
+    user: node
+    working_dir: /home/node/app
+    volumes:
+      - ../app/develop:/home/node/app
+    environment:
+      TZ: "Asia/Tokyo"
+    tty: true # running container
+    networks:
+      - docker-network
+
+networks:
+  docker-network:
